@@ -102,12 +102,16 @@ namespace MakerJs.path {
      */
     function populateShardPointsFromReferenceCircle(filletRadius: number, center: IPoint, properties: IMatchPointProperty[], options: IPointMatchOptions): boolean {
         var referenceCircle = new paths.Circle(center, filletRadius);
+        var primaryCircle = new paths.Circle(center + filletRadius, filletRadius);
 
         //get reference circle intersection points
         for (var i = 0; i < 2; i++) {
             var circleIntersection = intersection(referenceCircle, properties[i].path);
             if (!circleIntersection) {
                 return false;
+                if (circleIntersection == primaryCircle().points){
+                    return true;
+                }
             }
 
             properties[i].shardPoint = circleIntersection.intersectionPoints[0];
