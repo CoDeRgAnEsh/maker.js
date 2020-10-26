@@ -69,7 +69,7 @@ namespace MakerJs.exporter {
 
     /**
      * Convert a chain to SVG path data.
-     * 
+     *
      * @param chain Chain to convert.
      * @param offset IPoint relative offset point.
      * @param accuracy Optional accuracy of SVG path data.
@@ -166,7 +166,7 @@ namespace MakerJs.exporter {
 
     /**
      * Export a path to SVG path data.
-     * 
+     *
      * @param pathToExport IPath to export.
      * @param pathOffset IPoint relative offset of the path object.
      * @param exportOffset IPoint relative offset point of the export.
@@ -303,7 +303,7 @@ namespace MakerJs.exporter {
 
     /**
      * Renders an item in SVG markup.
-     * 
+     *
      * @param itemToExport Item to render: may be a path, an array of paths, or a model object.
      * @param options Rendering options object.
      * @param options.annotate Boolean to indicate that the id's of paths should be rendered as SVG text elements.
@@ -477,7 +477,7 @@ namespace MakerJs.exporter {
 
         //begin svg output
 
-        var svgAttrs: IXmlTagAttrs;
+        var svgAttrs: IXmlTagAttrs = {};
 
         if (size && opts.viewBox) {
             var width = round(size.width * opts.scale, opts.accuracy);
@@ -493,7 +493,8 @@ namespace MakerJs.exporter {
             };
         }
 
-        var svgTag = new XmlTag('svg', <IXmlTagAttrs>extendObject(svgAttrs || {}, opts.svgAttrs));
+        svgAttrs["xmlns"] = "http://www.w3.org/2000/svg";
+        var svgTag = new XmlTag('svg', <IXmlTagAttrs>extendObject(svgAttrs, opts.svgAttrs));
 
         append(svgTag.getOpeningTag(false));
 
@@ -707,6 +708,8 @@ namespace MakerJs.exporter {
                 layerGroup.innerTextEscaped = true;
                 append(layerGroup.toString());
             }
+
+            endModel(modelToExport);
         }
 
         const captionTags = captions.map(caption => {
@@ -719,12 +722,14 @@ namespace MakerJs.exporter {
                 "x": center[0],
                 "y": center[1]
             });
+            addSvgAttrs(tag.attrs, colorLayerOptions(caption.layer));
             tag.innerText = caption.text;
             return tag.toString();
         });
 
         if (captionTags.length) {
             const captionGroup = new XmlTag('g', { "id": "captions" });
+            addSvgAttrs(captionGroup.attrs, colorLayerOptions(captionGroup.attrs.id));
             captionGroup.innerText = captionTags.join('');
             captionGroup.innerTextEscaped = true;
             append(captionGroup.toString());
@@ -779,7 +784,7 @@ namespace MakerJs.exporter {
         d.push(r, r);
         d.push(0);                   //0 = x-axis rotation
         d.push(largeArc ? 1 : 0);    //large arc=1, small arc=0
-        d.push(increasing ? 0 : 1);  //sweep-flag 0=increasing, 1=decreasing 
+        d.push(increasing ? 0 : 1);  //sweep-flag 0=increasing, 1=decreasing
         d.push(round(end[0], accuracy), round(end[1], accuracy));
     }
 
@@ -875,7 +880,7 @@ namespace MakerJs.exporter {
         flow?: IFlowAnnotation;
 
         /**
-         * Rendered reference origin. 
+         * Rendered reference origin.
          */
         origin?: IPoint;
 
@@ -885,7 +890,7 @@ namespace MakerJs.exporter {
         useSvgPathOnly?: boolean;
 
         /**
-         * Flag to use SVG viewbox. 
+         * Flag to use SVG viewbox.
          */
         viewBox?: boolean;
 

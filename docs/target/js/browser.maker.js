@@ -39,13 +39,13 @@ and limitations under the License.
  *   author: Dan Marshall / Microsoft Corporation
  *   maintainers: Dan Marshall <danmar@microsoft.com>
  *   homepage: https://maker.js.org
- *   version: 0.13.0
+ *   version: 0.17.0
  *
  * browserify:
  *   license: MIT (http://opensource.org/licenses/MIT)
  *   author: James Halliday <mail@substack.net>
  *   homepage: https://github.com/browserify/browserify#readme
- *   version: 16.2.2
+ *   version: 16.3.0
  *
  * clone:
  *   license: MIT (http://opensource.org/licenses/MIT)
@@ -2357,14 +2357,14 @@ var MakerJs;
          */
         function getAllCaptionsOffset(modelContext) {
             var captions = [];
-            function tryAddCaption(m, offset) {
+            function tryAddCaption(m, offset, layer) {
                 if (m.caption) {
-                    captions.push({ text: m.caption.text, anchor: MakerJs.path.clone(m.caption.anchor, offset) });
+                    captions.push({ text: m.caption.text, anchor: MakerJs.path.clone(m.caption.anchor, offset), layer: (m.caption.anchor.layer || layer) });
                 }
             }
-            tryAddCaption(modelContext, modelContext.origin);
+            tryAddCaption(modelContext, modelContext.origin, modelContext.layer);
             model.walk(modelContext, {
-                afterChildWalk: function (wm) { return tryAddCaption(wm.childModel, wm.offset); }
+                afterChildWalk: function (wm) { return tryAddCaption(wm.childModel, wm.offset, wm.layer); }
             });
             return captions;
         }
@@ -3656,7 +3656,7 @@ var MakerJs;
             else if (arcSpan > 180) {
                 joints = 3;
             }
-            else if (arcSpan > 150 || bevel) {
+            else if (arcSpan > 150 || bevel) { //30 degrees is the sharpest
                 joints = 2;
             }
             var jointAngleInRadians = MakerJs.angle.toRadians(arcSpan / joints);
@@ -3757,8 +3757,8 @@ var MakerJs;
                             delete combineOptions.measureB;
                             //replace the rounded path with the straightened model
                             straightCaps.models[id].models[walkedPath.pathId] = straightened;
-                            //delete all the paths in the model containing this path
-                            delete walkedPath.modelContext.paths;
+                            //delete this path in the parent model
+                            delete walkedPath.modelContext.paths[walkedPath.pathId];
                         }
                     });
                 }
@@ -5122,21 +5122,22 @@ var MakerJs;
                 }
                 return polylineEntity;
             }
-            function mtext(caption) {
+            function text(caption) {
+                var layerId = defaultLayer(null, caption.layer);
+                var layerOptions = colorLayerOptions(layerId);
                 var center = MakerJs.point.middle(caption.anchor);
-                var mtextEntity = {
-                    type: "MTEXT",
-                    position: {
-                        x: MakerJs.round(center[0], opts.accuracy),
-                        y: MakerJs.round(center[1], opts.accuracy)
-                    },
-                    height: opts.fontSize,
+                var textEntity = {
+                    type: "TEXT",
+                    startPoint: appendVertex(center, null),
+                    endPoint: appendVertex(center, null),
+                    layer: layerId,
+                    textHeight: (layerOptions && layerOptions.fontSize) || opts.fontSize,
                     text: caption.text,
-                    attachmentPoint: 5,
-                    drawingDirection: 1,
-                    rotation: MakerJs.angle.ofPointInRadians(caption.anchor.origin, caption.anchor.end)
+                    halign: 4,
+                    valign: 0,
+                    rotation: MakerJs.angle.ofPointInDegrees(caption.anchor.origin, caption.anchor.end)
                 };
-                return mtextEntity;
+                return textEntity;
             }
             function layerOut(layerId, layerColor) {
                 var layerEntity = {
@@ -5144,6 +5145,19 @@ var MakerJs;
                     color: layerColor
                 };
                 return layerEntity;
+            }
+            function lineTypesOut() {
+                var lineStyleTable = {
+                    lineTypes: {
+                        "CONTINUOUS": {
+                            name: "CONTINUOUS",
+                            description: "______",
+                            patternLength: 0
+                        }
+                    }
+                };
+                var tableName = 'lineType';
+                doc.tables[tableName] = lineStyleTable;
             }
             function layersOut() {
                 var layerTable = {
@@ -5174,7 +5188,7 @@ var MakerJs;
                         entityArray.push(entity);
                     }
                 });
-                entityArray.push.apply(entityArray, captions.map(mtext));
+                entityArray.push.apply(entityArray, captions.map(text));
             }
             //fixup options
             if (!opts.units) {
@@ -5213,6 +5227,7 @@ var MakerJs;
             }
             entities(walkedPaths, chainsOnLayers, MakerJs.model.getAllCaptionsOffset(modelToExport));
             header();
+            lineTypesOut();
             layersOut();
             return outputDocument(doc);
         }
@@ -5242,33 +5257,49 @@ var MakerJs;
             //TODO - handle scenario if any bezier seeds get passed
             //map[pathType.BezierSeed]
             map["VERTEX"] = function (vertex) {
-                append("0", "VERTEX", "8", vertex.layer, "10", vertex.x, "20", vertex.y, "30", 0);
+                append("0", "VERTEX", "8", vertex.layer, "10", vertex.x, "20", vertex.y);
                 if (vertex.bulge !== undefined) {
                     append("42", vertex.bulge);
                 }
             };
             map["POLYLINE"] = function (polyline) {
-                append("0", "POLYLINE", "8", polyline.layer, "10", 0, "20", 0, "30", 0, "70", polyline.shape ? 1 : 0);
+                append("0", "POLYLINE", "8", polyline.layer, "66", 1, "70", polyline.shape ? 1 : 0);
                 polyline.vertices.forEach(function (vertex) { return map["VERTEX"](vertex); });
                 append("0", "SEQEND");
             };
-            map["MTEXT"] = function (mtext) {
-                append("0", "MTEXT", "10", mtext.position.x, "20", mtext.position.y, "40", mtext.height, "71", mtext.attachmentPoint, "72", mtext.drawingDirection, "1", mtext.text, //TODO: break into 250 char chunks
-                "50", mtext.rotation);
+            map["TEXT"] = function (text) {
+                append("0", "TEXT", "10", text.startPoint.x, "20", text.startPoint.y, "11", text.endPoint.x, "21", text.endPoint.y, "40", text.textHeight, "1", text.text, "50", text.rotation, "8", text.layer, "72", text.halign, "73", text.valign);
             };
             function section(sectionFn) {
                 append("0", "SECTION");
                 sectionFn();
                 append("0", "ENDSEC");
             }
+            function table(fn) {
+                append("0", "TABLE");
+                fn();
+                append("0", "ENDTAB");
+            }
             function tables() {
                 append("2", "TABLES");
-                append("0", "TABLE");
-                layersOut();
-                append("0", "ENDTAB");
+                table(lineTypesOut);
+                table(layersOut);
             }
             function layerOut(layer) {
                 append("0", "LAYER", "2", layer.name, "70", "0", "62", layer.color, "6", "CONTINUOUS");
+            }
+            function lineTypeOut(lineType) {
+                append("0", "LTYPE", "72", //72 Alignment code; value is always 65, the ASCII code for A
+                "65", "70", "64", "2", lineType.name, "3", lineType.description, "73", "0", "40", lineType.patternLength);
+            }
+            function lineTypesOut() {
+                var lineTypeTableName = 'lineType';
+                var lineTypeTable = doc.tables[lineTypeTableName];
+                append("2", "LTYPE");
+                for (var lineTypeId in lineTypeTable.lineTypes) {
+                    var lineType = lineTypeTable.lineTypes[lineTypeId];
+                    lineTypeOut(lineType);
+                }
             }
             function layersOut() {
                 var layerTableName = 'layer';
@@ -7815,7 +7846,7 @@ var MakerJs;
             //also pass back to options parameter
             MakerJs.extendObject(options, opts);
             //begin svg output
-            var svgAttrs;
+            var svgAttrs = {};
             if (size && opts.viewBox) {
                 var width = MakerJs.round(size.width * opts.scale, opts.accuracy);
                 var height = MakerJs.round(size.height * opts.scale, opts.accuracy);
@@ -7827,7 +7858,8 @@ var MakerJs;
                     viewBox: viewBox.join(' ')
                 };
             }
-            var svgTag = new exporter.XmlTag('svg', MakerJs.extendObject(svgAttrs || {}, opts.svgAttrs));
+            svgAttrs["xmlns"] = "http://www.w3.org/2000/svg";
+            var svgTag = new exporter.XmlTag('svg', MakerJs.extendObject(svgAttrs, opts.svgAttrs));
             append(svgTag.getOpeningTag(false));
             var groupAttrs = {
                 id: 'svgGroup',
@@ -7978,6 +8010,7 @@ var MakerJs;
                     layerGroup.innerTextEscaped = true;
                     append(layerGroup.toString());
                 }
+                endModel(modelToExport);
             }
             var captionTags = captions.map(function (caption) {
                 var anchor = fixPath(caption.anchor, opts.origin);
@@ -7989,11 +8022,13 @@ var MakerJs;
                     "x": center[0],
                     "y": center[1]
                 });
+                addSvgAttrs(tag.attrs, colorLayerOptions(caption.layer));
                 tag.innerText = caption.text;
                 return tag.toString();
             });
             if (captionTags.length) {
                 var captionGroup = new exporter.XmlTag('g', { "id": "captions" });
+                addSvgAttrs(captionGroup.attrs, colorLayerOptions(captionGroup.attrs.id));
                 captionGroup.innerText = captionTags.join('');
                 captionGroup.innerTextEscaped = true;
                 append(captionGroup.toString());
@@ -8041,7 +8076,7 @@ var MakerJs;
             d.push(r, r);
             d.push(0); //0 = x-axis rotation
             d.push(largeArc ? 1 : 0); //large arc=1, small arc=0
-            d.push(increasing ? 0 : 1); //sweep-flag 0=increasing, 1=decreasing 
+            d.push(increasing ? 0 : 1); //sweep-flag 0=increasing, 1=decreasing
             d.push(MakerJs.round(end[0], accuracy), MakerJs.round(end[1], accuracy));
         }
         /**
@@ -8769,8 +8804,11 @@ var MakerJs;
          */
         function getExtrema(b) {
             var extrema = b.extrema().values
+                //round the numbers so we can compare them to each other
                 .map(function (m) { return MakerJs.round(m); })
+                //remove duplicates
                 .filter(function (value, index, self) { return self.indexOf(value) === index; })
+                //and put them in order
                 .sort();
             if (extrema.length === 0)
                 return [0, 1];
@@ -8953,7 +8991,7 @@ var MakerJs;
                 }
                 this.type = MakerJs.pathType.BezierSeed;
                 switch (args.length) {
-                    case 1://point array
+                    case 1: //point array
                         var points = args[0];
                         this.origin = points[0];
                         if (points.length === 3) {
@@ -8968,7 +9006,7 @@ var MakerJs;
                             this.end = points[1];
                         }
                         break;
-                    case 3://quadratic or cubic
+                    case 3: //quadratic or cubic
                         if (Array.isArray(args[1])) {
                             this.controls = args[1];
                         }
@@ -8977,7 +9015,7 @@ var MakerJs;
                         }
                         this.end = args[2];
                         break;
-                    case 4://cubic params
+                    case 4: //cubic params
                         this.controls = [args[1], args[2]];
                         this.end = args[3];
                         break;
@@ -9005,7 +9043,7 @@ var MakerJs;
                             break;
                         }
                     //fall through to point array
-                    case 1://point array or seed
+                    case 1: //point array or seed
                         if (isArrayArg0) {
                             var points = args[0];
                             this.seed = new BezierSeed(points);
@@ -9552,7 +9590,7 @@ var MakerJs;
                 var maxRadius;
                 switch (style) {
                     case -1: //horizontal
-                    case 1://vertical
+                    case 1: //vertical
                         maxRadius = maxSide / 2;
                         break;
                     case 0: //equal
@@ -10194,6 +10232,6 @@ var MakerJs;
         ];
     })(models = MakerJs.models || (MakerJs.models = {}));
 })(MakerJs || (MakerJs = {}));
-MakerJs.version = "0.13.0";
+MakerJs.version = "0.17.0";
 
 },{"clone":2,"graham_scan":3,"kdbush":4}]},{},[]);
